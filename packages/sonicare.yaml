@@ -1,6 +1,24 @@
-# Originates in https://github.com/iamjoshk/home-assistant-collection/blob/main/ESPHome/Sonicare/esphome_sonicare_ble.yaml
-# and https://github.com/v6ak/esphome-collection/blob/main/packages/sonicare.yaml
+globals:
+  - id: ${id}_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
+logger: 
+
+esp32_ble_tracker:
+  id: ble_tracker
+  on_ble_advertise:
+  - then:
+      - lambda: |-
+          ESP_LOGD("ble_debug", "New device found: %s RSSI: %d", x.address_str().c_str(), x.get_rssi());
+  scan_parameters:
+    active: true
+
+bluetooth_proxy:
+  id: bt_proxy
+  active: true
+  
 ble_client:
   - mac_address: ${mac}
     id: ${id}
@@ -8,6 +26,9 @@ ble_client:
     auto_connect: true
     on_connect:
       then:
+        - logger.log: "${name} detected"
+        - lambda: id(ble_tracker).set_active(false);
+        - lambda: id(bt_proxy).set_active(false);
         - lambda: |-
             id(${id}_connected) = true;
             ESP_LOGD("ble_client_lambda", "Connected to ${name}");
@@ -37,16 +58,12 @@ ble_client:
             id(${id}_toothbrush_head_id).call_setup();
             id(${id}_toothbrush_strength).set_update_interval(UINT32_MAX /* = never */);
             id(${id}_toothbrush_strength).call_setup();
+        - logger.log: "${name} disconnected"
+        - lambda: id(ble_tracker).set_active(true);
+        - lambda: id(bt_proxy).set_active(true);
 
-globals:
-
-  - id: ${id}_connected
-    type: bool
-    restore_value: no
-    initial_value: 'false'
 
 binary_sensor:
-
   - platform: template
     name: ${name} Connection
     id: ${id}_ble_connection
@@ -223,6 +240,8 @@ text_sensor:
     icon: "mdi:toothbrush-electric"
     update_interval: never
     lambda: |-
+      ESP_LOGD("ble_client_lambda", "Toothbrush NFC state: ${id(${id}_toothbrush_head_nfc).state}");
+      ESP_LOGD("ble_client_lambda", "Toothbrush head ID: ${id(${id}_toothbrush_head_id).state}");
       if (id(${id}_toothbrush_head_nfc).state == 1) {
         if (id(${id}_toothbrush_head_id).state == 0) {
           return {"Adaptive Clean"};
